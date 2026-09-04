@@ -72,18 +72,27 @@ export class PortfolioLedger {
    * Seed the virtual wallet. Paper mode only — in live mode the balance is whatever the
    * hot wallet actually holds, and pretending otherwise would let the bot size trades it
    * cannot fund.
+   *
+   * The configured starting balance is the total across all quote assets, split evenly
+   * so the bot can trade launches in any of them. Funding each asset with the full
+   * amount would silently multiply the starting capital by the number of assets.
    */
-  fundVirtual(asset: QuoteAsset): void {
-    if (this.mode !== 'paper') return;
-    if (this.virtualBalances.has(asset.address)) return;
-    const amount = this.oracle.fromUsd(this.startingBalanceUsd, asset);
-    if (amount == null) return;
-    this.virtualBalances.set(asset.address, amount);
-    log.info('funded virtual balance', {
-      asset: asset.symbol,
-      amount: formatUnits(amount, asset.decimals, 6),
-      usd: this.startingBalanceUsd,
-    });
+  fundVirtual(assets: QuoteAsset[]): void {
+    if (this.mode !== 'paper' || assets.length === 0) return;
+
+    const perAssetUsd = this.startingBalanceUsd / assets.length;
+    for (const asset of assets) {
+      if (this.virtualBalances.has(asset.address)) continue;
+      const amount = this.oracle.fromUsd(perAssetUsd, asset);
+      if (amount == null) continue;
+      this.registerAsset(asset);
+      this.virtualBalances.set(asset.address, amount);
+      log.info('funded virtual balance', {
+        asset: asset.symbol,
+        amount: formatUnits(amount, asset.decimals, 6),
+        usd: Number(perAssetUsd.toFixed(2)),
+      });
+    }
   }
 
   virtualBalance(asset: QuoteAsset): bigint {

@@ -60,14 +60,63 @@ export class DecisionEngine {
   private readonly scouted = new Set<string>();
   private readonly confirmed = new Set<string>();
   private readonly recentRejections: RejectionRecord[] = [];
+  /** Launch events kept so a token can be re-evaluated as demand arrives. */
+  private readonly launchEvents = new Map<string, NewLaunchEvent>();
+  private confirmTimer: NodeJS.Timeout | null = null;
 
   readonly stats = { evaluated: 0, scoutEntries: 0, confirmEntries: 0, rejected: 0 };
 
   constructor(private readonly deps: DecisionDeps) {}
 
+  stop(): void {
+    if (this.confirmTimer) clearInterval(this.confirmTimer);
+    this.confirmTimer = null;
+  }
+
+  private remember(event: NewLaunchEvent): void {
+    this.launchEvents.set(event.tokenAddress, event);
+    // Bounded: the chain produces launches far faster than they resolve, and the
+    // listener has already evicted anything this old from its own tracking.
+    if (this.launchEvents.size > 1_000) {
+      const oldest = this.launchEvents.keys().next();
+      if (!oldest.done) this.launchEvents.delete(oldest.value);
+    }
+  }
+
+  /** Re-check open scout positions for an authenticity confirmation. */
+  private async sweepConfirm(): Promise<void> {
+    for (const position of this.deps.ledger.openPositions()) {
+      if (position.stage !== 'scout') continue;
+      if (this.confirmed.has(position.tokenAddress)) continue;
+      const signal = this.deps.walletTracker.evaluate(position.tokenAddress);
+      if (signal.authentic) await this.considerConfirm(signal);
+    }
+  }
+
   start(): void {
-    this.deps.bus.subscribe('launch.new', (event) => this.serialize(() => this.considerScout(event)));
+    this.deps.bus.subscribe('launch.new', (event) => {
+      this.remember(event);
+      void this.serialize(() => this.considerScout(event));
+    });
+
+    // A launch has no demand at the instant it is created, so evaluating it only then
+    // would reject every token in the system for having no demand. Re-evaluating when
+    // someone buys is what actually catches a launch as it starts working.
+    this.deps.bus.subscribe('launch.trade', (trade) => {
+      if (trade.side !== 'buy') return;
+      const event = this.launchEvents.get(trade.tokenAddress);
+      if (!event || this.scouted.has(trade.tokenAddress)) return;
+      void this.serialize(() => this.considerScout(event));
+    });
+
     this.deps.bus.subscribe('wallet.signal', (signal) => this.serialize(() => this.considerConfirm(signal)));
+
+    // Stage 2 also runs on a sweep, not only on tracked-wallet buys. The tracked list is
+    // built from observed graduations, so on a cold start it is empty and a purely
+    // event-driven confirm would never fire — but authenticity, which is the actual gate
+    // the spec describes, is measurable from the curve's own buyers straight away.
+    this.confirmTimer = setInterval(() => void this.serialize(() => this.sweepConfirm()), 5_000);
+
     log.info('decision engine started', {
       scoutSizePctOfEquity: this.deps.config.bot.decision.scoutSizePctOfEquity,
       confirmSizePctOfEquity: this.deps.config.bot.decision.confirmSizePctOfEquity,

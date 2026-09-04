@@ -1,5 +1,5 @@
 import { graduationProgress, sellImpactBps } from '@rhc/chain';
-import { createLogger, mutex, type AppConfig, type MessageBus } from '@rhc/core';
+import { createLogger, mutex, type AppConfig, type MessageBus, type UsdPriceOracle } from '@rhc/core';
 import type { ExecutionService, PortfolioLedger } from '@rhc/execution';
 import type { RiskManager } from '@rhc/risk-manager';
 import type { ExitSignal, Position } from '@rhc/types';
@@ -23,6 +23,7 @@ interface PendingStop {
 export interface ExitDeps {
   config: AppConfig;
   bus: MessageBus;
+  oracle: UsdPriceOracle;
   ledger: PortfolioLedger;
   execution: ExecutionService;
   risk: RiskManager;
@@ -123,18 +124,31 @@ export class ExitEngineService {
       return;
     }
 
-    // Impact one sell our own size would have at current depth. This is what makes the
-    // stop liquidity-aware rather than a percentage guess.
+    // Two impact measures at current curve depth: what our own exit would cost, and what
+    // one ordinary participant's sell would cost. Together they set the threshold that
+    // separates single-wallet noise from real selling pressure.
     const ownSizeTokens =
       (BigInt(updated.tokensHeld) * BigInt(Math.round(config.bot.exit.depthAwareStopSizeFraction * 10_000))) /
       10_000n;
     const impactBpsOfOwnSize = sellImpactBps(marked.snapshot, ownSizeTokens);
 
+    const referenceQuote = this.deps.oracle.fromUsd(config.bot.exit.depthStopReferenceTradeUsd, updated.quoteAsset);
+    const markPrice = BigInt(updated.markPrice);
+    const referenceTokens =
+      referenceQuote != null && markPrice > 0n ? (referenceQuote * 10n ** 18n) / markPrice : 0n;
+    const impactBpsOfReferenceTrade = sellImpactBps(marked.snapshot, referenceTokens);
+
     const decision =
       evaluateTakeProfit(config.bot, updated, currentMultiple) ??
       evaluateGraduationTrim(config.bot, updated, progress) ??
       evaluateTrailingStop(config.bot, updated, currentMultiple) ??
-      evaluateDepthAwareStop(config.bot, updated, currentMultiple, impactBpsOfOwnSize) ??
+      evaluateDepthAwareStop(
+        config.bot,
+        updated,
+        currentMultiple,
+        impactBpsOfOwnSize,
+        impactBpsOfReferenceTrade,
+      ) ??
       evaluateTimeout(config.bot, updated, Date.now());
 
     if (!decision) {

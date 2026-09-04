@@ -1,0 +1,25 @@
+{
+  "name": "@rhc/bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-sqlite --no-warnings --import tsx src/main.ts",
+    "start": "node --experimental-sqlite --no-warnings --import tsx src/main.ts",
+    "preflight": "node --experimental-sqlite --no-warnings --import tsx src/preflight.ts"
+  },
+  "dependencies": {
+    "@rhc/chain": "0.1.0",
+    "@rhc/core": "0.1.0",
+    "@rhc/decision-engine": "0.1.0",
+    "@rhc/deployer-graph": "0.1.0",
+    "@rhc/event-listener": "0.1.0",
+    "@rhc/execution": "0.1.0",
+    "@rhc/exit-engine": "0.1.0",
+    "@rhc/risk-manager": "0.1.0",
+    "@rhc/types": "0.1.0",
+    "@rhc/vetting": "0.1.0",
+    "@rhc/wallet-tracker": "0.1.0",
+    "viem": "2.56.3"
+  }
+}

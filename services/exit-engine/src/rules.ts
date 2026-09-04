@@ -80,18 +80,41 @@ export function evaluateTrailingStop(
 }
 
 /**
+ * The drawdown that ordinary single-wallet activity can produce at the curve's current
+ * depth. Anything shallower than this is noise; anything deeper is real selling.
+ *
+ * Derived from two impacts, whichever is larger:
+ *
+ *  - a reference trade, sized in USD as one ordinary participant's sell. This is the
+ *    part that makes the stop depth-aware in the way that matters. The same $250 sell
+ *    barely moves a curve near graduation and craters one that just launched, so the
+ *    stop is naturally wide early and tightens as real liquidity accumulates.
+ *  - our own exit. We should never stop on a move no larger than the one our own sell
+ *    would cause.
+ *
+ * An earlier version used only our own size, which was wrong in a way worth recording:
+ * with small positions in a reasonably deep curve, own-impact rounds to almost nothing
+ * and the "depth-aware" stop collapses into a flat few-percent stop that no meme launch
+ * survives. The reference trade is what keeps the measure anchored to the curve rather
+ * than to our position size.
+ */
+export function noiseFloorPct(
+  config: BotConfig,
+  impactBpsOfOwnSize: number,
+  impactBpsOfReferenceTrade: number,
+): number {
+  const { depthStopImpactMultiplier, depthStopMinPct, depthStopMaxPct } = config.exit;
+  const largestImpactPct = Math.max(impactBpsOfOwnSize, impactBpsOfReferenceTrade) / 100;
+  return Math.min(depthStopMaxPct, Math.max(depthStopMinPct, largestImpactPct * depthStopImpactMultiplier));
+}
+
+/**
  * Liquidity-aware stop.
  *
  * A raw percentage stop is the wrong instrument on a bonding curve, because price impact
  * there is mechanically determined by the reserve balance: on a thin curve a single
- * ordinary-sized sell moves the price further than a "crash" would on a deep one, and a
+ * ordinary-sized sell moves the price further than a crash would on a deep one, and a
  * percentage stop cannot tell those apart.
- *
- * So the drawdown is compared against `impactBpsOfOwnSize` — the impact one sell the
- * size of our own position would produce at the curve's current depth. A drawdown within
- * that is one wallet's noise and is ignored. A drawdown beyond it means more selling
- * arrived than any single participant our size could explain, which is the thing worth
- * stopping on.
  *
  * Post-graduation the same logic applies against Uniswap v4 pool depth.
  */
@@ -100,6 +123,7 @@ export function evaluateDepthAwareStop(
   position: Position,
   currentMultiple: number,
   impactBpsOfOwnSize: number,
+  impactBpsOfReferenceTrade: number,
 ): ExitDecision | null {
   const drawdownPct = (1 - currentMultiple) * 100;
   if (drawdownPct <= 0) return null;
@@ -114,19 +138,15 @@ export function evaluateDepthAwareStop(
     };
   }
 
-  // Impact is in bps of price; the drawdown is a percentage. Convert and add a margin so
-  // the stop is not triggered by exactly the move our own exit would cause.
-  const ownImpactPct = impactBpsOfOwnSize / 100;
-  const noiseFloorPct = Math.max(5, ownImpactPct * 1.5);
-
-  if (drawdownPct > noiseFloorPct) {
+  const floor = noiseFloorPct(config, impactBpsOfOwnSize, impactBpsOfReferenceTrade);
+  if (drawdownPct > floor) {
     return {
       reason: 'curve-depth-stop',
       fraction: 1,
       ladderStep: null,
       detail:
-        `down ${drawdownPct.toFixed(1)}%, deeper than the ${noiseFloorPct.toFixed(1)}% a single ` +
-        'sell our own size could explain at current curve depth',
+        `down ${drawdownPct.toFixed(1)}%, deeper than the ${floor.toFixed(1)}% that ordinary ` +
+        'single-wallet selling explains at current curve depth',
       requiresPersistence: true,
     };
   }

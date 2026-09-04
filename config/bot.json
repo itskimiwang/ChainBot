@@ -85,6 +85,10 @@
     "stopPersistenceSeconds": 6,
     "stopPersistenceBlocks": 40,
     "depthAwareStopSizeFraction": 1,
+    "depthStopReferenceTradeUsd": 250,
+    "depthStopImpactMultiplier": 1.5,
+    "depthStopMinPct": 18,
+    "depthStopMaxPct": 45,
     "graduationProximityTrim": {
       "enabled": true,
       "progressThreshold": 0.92,

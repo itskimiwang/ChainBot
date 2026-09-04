@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { registerSecret } from './logger.js';
 
@@ -212,11 +212,18 @@ const BotConfigSchema = z.object({
      */
     stopPersistenceSeconds: z.number().positive(),
     stopPersistenceBlocks: z.number().int().positive(),
-    /**
-     * Curve depth, not raw percentage. A drawdown only counts if a sell of this share of
-     * the position could have caused it — otherwise it is real selling pressure.
-     */
+    /** Share of the position used when measuring our own exit's price impact. */
     depthAwareStopSizeFraction: z.number().min(0).max(1),
+    /**
+     * Size of one ordinary participant's sell, in USD. The stop threshold is derived
+     * from what a trade this size would do to the price at current curve depth, which is
+     * what makes the stop scale with liquidity instead of being a fixed percentage.
+     */
+    depthStopReferenceTradeUsd: z.number().positive(),
+    depthStopImpactMultiplier: z.number().positive(),
+    /** Bounds on the derived threshold, so it cannot collapse or run away. */
+    depthStopMinPct: z.number().positive(),
+    depthStopMaxPct: z.number().positive(),
     /** Take some off the table as graduation opens real Uniswap liquidity. */
     graduationProximityTrim: z.object({
       enabled: z.boolean(),
@@ -304,6 +311,32 @@ export interface AppConfig {
   rpcHttpUrl: string;
   rpcWsUrl: string | null;
   configDir: string;
+  repoRoot: string;
+}
+
+/**
+ * Locate the repo root by walking up from the working directory looking for the config
+ * it must contain.
+ *
+ * npm workspaces run scripts with the cwd set to the package directory, so a relative
+ * path like `config/chain.json` or `data/ledger.sqlite` resolves differently depending
+ * on whether the bot was started from the root or from `apps/bot`. Anchoring both to the
+ * repo root means one config file and one database regardless of how it was launched.
+ */
+export function findRepoRoot(start = process.cwd()): string {
+  let dir = resolve(start);
+  for (let depth = 0; depth < 8; depth++) {
+    if (existsSync(resolve(dir, 'config', 'chain.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`could not locate config/chain.json walking up from ${start}`);
+}
+
+/** Resolve a config-relative path (databases, kill-switch file) against the repo root. */
+export function resolveFromRoot(config: AppConfig, path: string): string {
+  return resolve(config.repoRoot, path);
 }
 
 function readJson(path: string): unknown {
@@ -314,7 +347,10 @@ function readJson(path: string): unknown {
   }
 }
 
-export function loadConfig(configDir = resolve(process.cwd(), 'config')): AppConfig {
+export function loadConfig(configDir?: string): AppConfig {
+  const repoRoot = findRepoRoot();
+  configDir ??= process.env.RHC_CONFIG_DIR ?? resolve(repoRoot, 'config');
+
   const chain = ChainConfigSchema.parse(readJson(resolve(configDir, 'chain.json')));
   const bot = BotConfigSchema.parse(readJson(resolve(configDir, 'bot.json')));
   const secrets = loadSecrets();
@@ -338,7 +374,13 @@ export function loadConfig(configDir = resolve(process.cwd(), 'config')): AppCon
     throw new Error(`decision.weights must sum to 1, got ${weightSum}`);
   }
 
-  return { chain, bot, secrets, rpcHttpUrl, rpcWsUrl, configDir };
+  // Anchor every filesystem path in the config so the bot behaves identically whether it
+  // was started from the repo root or from inside a workspace package.
+  bot.deployerGraph.dbPath = resolve(repoRoot, bot.deployerGraph.dbPath);
+  bot.walletTracker.dbPath = resolve(repoRoot, bot.walletTracker.dbPath);
+  bot.risk.killSwitchFile = resolve(repoRoot, bot.risk.killSwitchFile);
+
+  return { chain, bot, secrets, rpcHttpUrl, rpcWsUrl, configDir, repoRoot };
 }
 
 /**
