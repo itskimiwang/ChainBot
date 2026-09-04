@@ -37,7 +37,7 @@ within a few seconds.
 Run them separately with `npm run dev:bot` and `npm run dev:ui`.
 
 ```bash
-npm test        # 126 tests
+npm test        # 135 tests
 npm run lint    # typecheck + tests
 ```
 
@@ -118,6 +118,12 @@ would realise selling your whole position differ a lot, and marking at spot is h
 paper ledger reports gains that were never exitable. Every position is therefore marked
 through `quoteSell` at its actual size. On the same principle, a position stranded by
 graduation is carried at **zero** rather than at its last curve mark — see below.
+
+Prices are fixed-point for the same reason. A 1B-supply token quoted in 6-decimal USDG
+costs a few millionths of a USDG, so a price held in plain quote base units carries about
+one significant figure: entry and mark round to the same integer while the position is
+visibly up or down, and the smallest move the ladder can express is tens of percent.
+Every price is scaled by `PRICE_SCALE` so a low-decimal quote asset is as precise as ETH.
 
 ### Stops are computed from reserve depth, not from a percentage
 
