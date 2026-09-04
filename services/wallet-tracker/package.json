@@ -1,0 +1,15 @@
+{
+  "name": "@rhc/wallet-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@rhc/chain": "0.1.0",
+    "@rhc/core": "0.1.0",
+    "@rhc/deployer-graph": "0.1.0",
+    "@rhc/types": "0.1.0"
+  }
+}
