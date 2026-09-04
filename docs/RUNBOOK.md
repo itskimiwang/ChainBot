@@ -62,6 +62,23 @@ A `no-go` is information, not a failure. The criteria that missed tell you what 
 Change one thing, restart the window, and do not shorten it because the first hours looked
 good.
 
+Which criterion missed points at a different part of the system:
+
+| Missed criterion | Where to look first |
+| --- | --- |
+| Win rate, with peak multiples clustered near 1.0x | Entries are not catching moves at all. Check the graduation progress at entry: `decision.maxGraduationProgress` admits tokens up to 85% of the way to the threshold, and `proximityComponent` scores them *highest* there, so the bot pays the most for the most extended curves. Lowering both is the first thing to try. |
+| Win rate, with peak multiples well above 1.0x | Entries are fine and exits are early. Widen `exit.trailingStopBasePct` and `exit.depthStopMinPct`, or lower the first ladder rung below 2x. |
+| Net P&L negative but win rate acceptable | Losers are bigger than winners. The ladder is taking profit too early relative to where stops sit. |
+| Max drawdown | Position sizing or concurrency, not signal quality. `decision.scoutSizePctOfEquity` and `risk.maxConcurrentPositions`. |
+| Closed trades below the minimum | Not a strategy result at all — too few entries to conclude anything. Check rejections before changing any threshold. |
+| Stranded by graduation | Lower `exit.graduationProximityTrim.progressThreshold` so the trim fires earlier, or cap `decision.maxGraduationProgress` so the bot stops entering curves that are about to be swept. |
+
+A caution the first run made concrete: on a quiet or hostile stretch, most curves never
+graduate and a token can retrace its entire reserve in under a minute. A losing window is
+frequently the market rather than a misconfiguration, and tuning thresholds until a
+*single* window passes is how you fit the strategy to noise. Prefer a change you can argue
+for from the rejection reasons and the exit-reason mix.
+
 ---
 
 ## Going live
