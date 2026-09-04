@@ -74,13 +74,18 @@ export function EvaluationCard({ report }: { report: EvaluationReport | null }) 
         {report.criteria.map((criterion) => (
           <li
             key={criterion.id}
-            className="flex items-center gap-3 px-4 py-2 text-sm"
+            className="flex items-start gap-3 px-4 py-2 text-sm"
           >
-            <CriterionIcon met={criterion.met} />
-            <span className="min-w-0 flex-1 truncate text-foreground/90">
+            <span className="mt-0.5">
+              <CriterionIcon met={criterion.met} />
+            </span>
+            {/* Labels wrap rather than truncate: "entries into unsellable tokens"
+                clipped to "entries into unsellable t…" is not a criterion anyone can
+                act on. */}
+            <span className="min-w-0 flex-1 text-pretty text-foreground/90">
               {criterion.label}
             </span>
-            <span className="tnum shrink-0 text-xs text-muted-foreground">
+            <span className="tnum shrink-0 pt-0.5 text-xs text-muted-foreground">
               {criterion.target}
             </span>
             <span
