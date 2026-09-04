@@ -16,8 +16,12 @@ const log = createLogger('pricing');
  * feed: Pons sizes every approved quote asset's graduation threshold to the same USD
  * notional, so the thresholds are a ratio table between the assets. Anchoring on the
  * dollar stablecoin turns that into USD prices that refresh themselves from chain state.
- * It is an inference about launchpad configuration, so it is labelled as such
- * everywhere it surfaces, and any asset can be pinned via config.
+ *
+ * Thresholds are set in round numbers, so derived prices are approximate — two assets
+ * priced closely enough will land on the same threshold and read as identical. That is
+ * fine for what this is used for and would not be fine for anything else, so it is an
+ * inference labelled as such everywhere it surfaces, and any asset can be pinned via
+ * `accounting.usdPriceOverrides`.
  */
 export class UsdPriceOracle {
   private readonly bySymbol = new Map<string, number>();

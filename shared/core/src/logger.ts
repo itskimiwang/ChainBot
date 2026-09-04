@@ -30,7 +30,16 @@ const PATTERNS: Array<[RegExp, string]> = [
   [/\b\d{8,10}:[A-Za-z0-9_-]{30,}\b/g, '[REDACTED_TELEGRAM_TOKEN]'],
 ];
 
-const SENSITIVE_KEY = /(private|secret|seed|mnemonic|passphrase|password|token|apikey|api_key|auth)/i;
+/**
+ * Field names whose values are always masked.
+ *
+ * Deliberately precise rather than broad. A bare `token` or `auth` substring would be
+ * the obvious pattern, but in this domain "token" is the primary business object — it
+ * would redact every token address in every trade log and make the output useless,
+ * which is its own kind of operational failure.
+ */
+const SENSITIVE_KEY =
+  /(privatekey|private_key|secretkey|secret_key|\bsecret\b|mnemonic|passphrase|password|apikey|api_key|accesstoken|access_token|bottoken|bot_token|authtoken|auth_token|refreshtoken|refresh_token|bearer|credential|seedphrase|seed_phrase)/i;
 
 /**
  * 32-byte hex is ambiguous: it matches both private keys and tx hashes, and blanket

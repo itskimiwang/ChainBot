@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { createLogger, type AppConfig } from '@rhc/core';
+import { createLogger, parseUnits, type AppConfig } from '@rhc/core';
 import type { QuoteAsset } from '@rhc/types';
 import type { ChainReader } from './reader.js';
 
@@ -57,32 +57,60 @@ export class QuoteAssetRegistry {
     if (cached) return cached;
     if (this.unresolved.has(key)) return null;
 
+    const asset = key === NATIVE ? this.resolveNative() : await this.resolveErc20(address);
+    if (!asset) {
+      this.unresolved.add(key);
+      return null;
+    }
+
+    this.byAddress.set(key, asset);
+    return asset;
+  }
+
+  /**
+   * Native ETH is quoted by the factory but is not in its `approvedPairTokens` map —
+   * that map covers ERC-20 pair tokens only, and native quoting is handled separately.
+   *
+   * Treating a `false` there as "not tradable" silently discarded every native-quoted
+   * launch, which is the largest single segment on the chain and the one the 4.2 ETH
+   * graduation threshold refers to. Native is resolved from chain config instead, and
+   * the authoritative per-launch threshold still arrives on the TokenLaunched event.
+   */
+  private resolveNative(): QuoteAsset {
+    const { nativeCurrency } = this.config.chain.chain;
+    const seed = this.config.chain.quoteAssets.seed.find((s) => s.address.toLowerCase() === NATIVE);
+    const threshold = seed?.graduationThreshold
+      ? parseUnits(seed.graduationThreshold, nativeCurrency.decimals).toString()
+      : null;
+
+    return {
+      symbol: nativeCurrency.symbol,
+      address: NATIVE as QuoteAsset['address'],
+      decimals: nativeCurrency.decimals,
+      isNative: true,
+      graduationThreshold: threshold,
+      phantomQuote: null,
+    };
+  }
+
+  private async resolveErc20(address: Address): Promise<QuoteAsset | null> {
     const economics = await this.reader.readPairTokenEconomics(this.factory, address);
     if (!economics || !economics.approved) {
-      this.unresolved.add(key);
       log.debug('quote asset not approved by factory', { address });
       return null;
     }
 
-    const isNative = key === NATIVE;
-    let symbol = this.symbolSeed.get(key);
-    if (!symbol) {
-      symbol = isNative
-        ? this.config.chain.chain.nativeCurrency.symbol
-        : (await this.reader.readTokenMeta(address)).symbol;
-    }
+    const key = address.toLowerCase();
+    const symbol = this.symbolSeed.get(key) ?? (await this.reader.readTokenMeta(address)).symbol;
 
-    const asset: QuoteAsset = {
+    return {
       symbol,
       address: key as QuoteAsset['address'],
       decimals: economics.decimals,
-      isNative,
+      isNative: false,
       graduationThreshold: economics.graduationThreshold.toString(),
       phantomQuote: economics.phantomQuote.toString(),
     };
-
-    this.byAddress.set(key, asset);
-    return asset;
   }
 
   get(address: string): QuoteAsset | undefined {
