@@ -1,0 +1,130 @@
+{
+  "configVersion": 1,
+
+  "mode": "paper",
+
+  "accounting": {
+    "displayCurrency": "USD",
+    "startingBalanceUsd": 1000,
+    "usdPriceStrategy": "derive-from-graduation-threshold",
+    "stableAnchorSymbol": "USDG",
+    "usdPriceOverrides": {}
+  },
+
+  "listener": {
+    "transport": "auto",
+    "pollIntervalMs": 400,
+    "logPageSize": 2000,
+    "backfillBlocks": 3000,
+    "curveIdleEvictionSeconds": 900,
+    "maxTrackedCurves": 250,
+    "quoteAssetAllowlist": ["ETH", "USDG"]
+  },
+
+  "vetting": {
+    "simulationSizeUsd": 25,
+    "maxBuyTaxBps": 500,
+    "maxSellTaxBps": 500,
+    "maxCreatorTaxBps": 300,
+    "minRoundTripRetentionBps": 8000,
+    "requireOwnerRenounced": true,
+    "useExternalScanner": true,
+    "failOpenOnScannerError": true
+  },
+
+  "deployerGraph": {
+    "dbPath": "data/deployer-graph.sqlite",
+    "fundingTraceDepth": 2,
+    "rugClusterThreshold": 0.6,
+    "minLaunchesForConfidence": 3,
+    "unknownDeployerScore": 0.4,
+    "stalledProgressThreshold": 0.15,
+    "outcomeEvaluationMinutes": 30
+  },
+
+  "walletTracker": {
+    "dbPath": "data/wallet-tracker.sqlite",
+    "windowSeconds": 180,
+    "minUniqueBuyers": 12,
+    "minUniqueBuyerVelocity": 4,
+    "maxConcentrationScore": 0.82,
+    "maxSharedFundingVolumeShare": 0.4,
+    "minProfitableEntriesToTrack": 3,
+    "earlyEntryProgressThreshold": 0.25
+  },
+
+  "decision": {
+    "scoutSizePctOfEquity": 0.02,
+    "confirmSizePctOfEquity": 0.05,
+    "minCombinedConfidence": 0.42,
+    "minDeployerScoreForScout": 0.35,
+    "minGraduationProgress": 0.04,
+    "maxGraduationProgress": 0.85,
+    "maxSnipeTaxBps": 200,
+    "maxSlippageBps": 400,
+    "weights": {
+      "deployer": 0.3,
+      "authenticity": 0.35,
+      "demandVelocity": 0.2,
+      "graduationProximity": 0.15
+    },
+    "maxLaunchAgeSeconds": 1800
+  },
+
+  "exit": {
+    "takeProfitLadder": [
+      { "multiple": 2, "fraction": 0.3 },
+      { "multiple": 3.5, "fraction": 0.3 },
+      { "multiple": 6, "fraction": 0.25 },
+      { "multiple": 12, "fraction": 0.25 }
+    ],
+    "trailingStopBasePct": 22,
+    "trailingStopWidenPerMultiple": 4,
+    "maxTrailingStopPct": 55,
+    "hardStopPct": 35,
+    "stopPersistenceSeconds": 6,
+    "stopPersistenceBlocks": 40,
+    "depthAwareStopSizeFraction": 1,
+    "graduationProximityTrim": {
+      "enabled": true,
+      "progressThreshold": 0.92,
+      "fraction": 0.25
+    },
+    "maxHoldSeconds": 5400,
+    "markRefreshMs": 3000
+  },
+
+  "risk": {
+    "maxPositionSizeUsd": 60,
+    "maxConcurrentPositions": 5,
+    "dailyLossLimitPct": 15,
+    "maxTradesPerDay": 60,
+    "maxTotalExposurePct": 0.35,
+    "clusterCooldownSeconds": 1800,
+    "killSwitchFile": "data/KILL"
+  },
+
+  "evaluation": {
+    "windowHours": 48,
+    "minTrades": 30,
+    "minWinRate": 0.4,
+    "maxDrawdownPct": 20,
+    "minNetPnlPct": 5,
+    "maxHoneypotEntryRate": 0.02
+  },
+
+  "api": {
+    "host": "127.0.0.1",
+    "port": 43117
+  },
+
+  "alerts": {
+    "telegram": {
+      "enabled": true,
+      "botTokenEnvVar": "TELEGRAM_BOT_TOKEN",
+      "chatIdEnvVar": "TELEGRAM_CHAT_ID",
+      "commandPolling": true,
+      "pollIntervalMs": 2000
+    }
+  }
+}

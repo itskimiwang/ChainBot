@@ -1,0 +1,15 @@
+{
+  "name": "@rhc/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@rhc/types": "0.1.0",
+    "zod": "4.5.4"
+  }
+}
