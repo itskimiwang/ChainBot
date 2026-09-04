@@ -256,6 +256,12 @@ const BotConfigSchema = z.object({
     minNetPnlPct: z.number(),
     /** Vetting must reject the honeypots; a low rate means the filter is not working. */
     maxHoneypotEntryRate: z.number().min(0).max(1),
+    /**
+     * Share of entries left holding an unsellable position because the curve graduated
+     * before the exit engine got out. Each one writes off its cost basis, so this is a
+     * capital-loss gate as much as a timing one.
+     */
+    maxStrandedRate: z.number().min(0).max(1),
   }),
 
   api: z.object({

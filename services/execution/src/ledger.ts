@@ -106,24 +106,38 @@ export class PortfolioLedger {
    * into the current curve would actually return — not at spot. On a thin bonding curve
    * those differ a lot, and marking at spot is how a paper ledger reports gains that
    * were never exitable.
+   *
+   * Stranded positions are carried at zero for the same reason, taken to its conclusion:
+   * their last curve mark can be arbitrarily high (a token that ran hard on its way to
+   * graduation), and counting an unsellable holding at that price would inflate equity,
+   * suppress drawdown, and hand the go/no-go gate a number that no exit could ever have
+   * produced. Zero understates them — the tokens do have value in the v4 pool — but the
+   * error points the safe way for a decision about risking real capital.
    */
   equityUsd(): number {
     let total = 0;
-    const counted = new Set<string>();
 
     for (const [address, balance] of this.virtualBalances) {
       const asset = this.assetOf(address);
       if (!asset) continue;
       total += this.oracle.toUsd(balance, asset) ?? 0;
-      counted.add(address);
     }
 
     for (const position of this.positions.values()) {
-      if (position.status === 'closed') continue;
+      if (position.status === 'closed' || position.status === 'stranded') continue;
       const markValue = (BigInt(position.tokensHeld) * BigInt(position.markPrice)) / 10n ** 18n;
       total += this.oracle.toUsd(markValue, position.quoteAsset) ?? 0;
     }
 
+    return total;
+  }
+
+  /** Quote-asset cost basis locked up in positions that cannot be sold. */
+  strandedCostUsd(): number {
+    let total = 0;
+    for (const position of this.strandedPositions()) {
+      total += this.oracle.toUsd(BigInt(position.quoteInvested), position.quoteAsset) ?? 0;
+    }
     return total;
   }
 
@@ -144,8 +158,45 @@ export class PortfolioLedger {
     return id ? this.positions.get(id) : undefined;
   }
 
+  /**
+   * Positions the exit engine should still be working on.
+   *
+   * Stranded positions are excluded. They are unsellable until a Uniswap v4 route
+   * exists, so leaving them here would re-evaluate them on every tick forever and — far
+   * worse — hold a concurrency slot against `maxConcurrentPositions` permanently, which
+   * silently starves the bot of capacity one stranding at a time.
+   */
   openPositions(): Position[] {
-    return [...this.positions.values()].filter((p) => p.status !== 'closed');
+    return [...this.positions.values()].filter((p) => p.status === 'open' || p.status === 'closing');
+  }
+
+  strandedPositions(): Position[] {
+    return [...this.positions.values()].filter((p) => p.status === 'stranded');
+  }
+
+  /**
+   * Record that a position can no longer be sold through any route this bot implements.
+   *
+   * The token stays mapped so the decision engine will not re-enter a name we are
+   * already stuck in.
+   */
+  markStranded(positionId: string, detail: string): Position | null {
+    const position = this.positions.get(positionId);
+    if (!position || position.status === 'stranded' || position.status === 'closed') return null;
+
+    position.status = 'stranded';
+    position.closedAt = Date.now();
+    position.exitReason = 'graduation-exit';
+    position.unrealizedPnlQuote = '0';
+    this.persist(position);
+
+    log.warn('position stranded', {
+      positionId,
+      token: position.tokenAddress,
+      symbol: position.symbol,
+      detail,
+    });
+    return position;
   }
 
   allPositions(limit = 200): Position[] {
@@ -272,7 +323,7 @@ export class PortfolioLedger {
   /** Refresh the mark and peak multiple from current chain state. */
   updateMark(positionId: string, markPrice: bigint, lastPrice: bigint, phase?: LaunchPhase): Position | null {
     const position = this.positions.get(positionId);
-    if (!position || position.status === 'closed') return null;
+    if (!position || position.status === 'closed' || position.status === 'stranded') return null;
 
     position.markPrice = markPrice.toString();
     position.lastPrice = lastPrice.toString();

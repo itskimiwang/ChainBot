@@ -298,7 +298,13 @@ export const PositionSchema = z.object({
   phase: LaunchPhaseSchema,
   quoteAsset: QuoteAssetSchema,
   mode: z.enum(['paper', 'live']),
-  status: z.enum(['open', 'closing', 'closed']),
+  /**
+   * `stranded` means the curve stopped accepting sells while we still held tokens. The
+   * position is not closed — the tokens exist and have value in the Uniswap v4 pool —
+   * but nothing in this system can currently realise it, so it is held apart from both
+   * open and closed positions rather than being counted as either.
+   */
+  status: z.enum(['open', 'closing', 'closed', 'stranded']),
   stage: EntryStageSchema,
   /** Quote base units committed, net of any partial exits. */
   quoteInvested: BaseUnitsSchema,

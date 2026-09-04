@@ -48,7 +48,7 @@ export class ExitEngineService {
   private readonly pendingStops = new Map<string, PendingStop>();
   private timer: NodeJS.Timeout | null = null;
 
-  readonly stats = { ticks: 0, exitsFired: 0, stopsArmed: 0, stopsDisarmed: 0 };
+  readonly stats = { ticks: 0, exitsFired: 0, stopsArmed: 0, stopsDisarmed: 0, stranded: 0 };
 
   constructor(private readonly deps: ExitDeps) {}
 
@@ -107,19 +107,27 @@ export class ExitEngineService {
     const { config } = this.deps;
 
     // The curve refuses sells from the sweep onward, before the factory reports a new
-    // phase. There is nothing to do here but stop pretending an exit is available.
+    // phase. Exiting from here needs the Uniswap v4 route, which does not exist yet, so
+    // the position is marked stranded exactly once. Retrying would re-alert on every
+    // tick and hold a concurrency slot for the lifetime of the process.
     if (marked.snapshot.readyToGraduate || marked.snapshot.graduated) {
-      log.warn('position stranded: curve closed to sells before exit', {
-        token: updated.tokenAddress,
-        symbol: updated.symbol,
-        multiple: currentMultiple.toFixed(2),
-      });
+      const stranded = this.deps.ledger.markStranded(
+        updated.positionId,
+        `curve closed to sells at ${currentMultiple.toFixed(2)}x`,
+      );
+      if (!stranded) return;
+
+      this.stats.stranded += 1;
+      this.deps.unpin(updated.tokenAddress);
       this.deps.bus.publish('alert.notify', {
         level: 'warn',
-        title: `${updated.symbol} graduated while held`,
+        title: `${updated.symbol} graduated while still held`,
         body:
-          `The curve stopped accepting sells at ${currentMultiple.toFixed(2)}x. ` +
-          'Exiting requires the Uniswap v4 route, which is not implemented.',
+          `The curve stopped accepting sells at ${currentMultiple.toFixed(2)}x, so ` +
+          `${updated.symbol} cannot be exited: selling now needs the Uniswap v4 route, ` +
+          'which is not implemented. The cost basis is written down to zero and the ' +
+          'position no longer occupies a slot. Trim earlier by lowering ' +
+          'exit.graduationProximityTrim.progressThreshold.',
       });
       return;
     }

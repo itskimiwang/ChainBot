@@ -268,6 +268,7 @@ async function main(): Promise<void> {
       maxDrawdownPct: risk.peakDrawdownPct,
       closedPositions: closedThisRun,
       honeypotEntries,
+      strandedPositions: ledger.strandedPositions().length,
     });
 
   telegram.start({
@@ -348,6 +349,8 @@ async function main(): Promise<void> {
   api.get('/api/positions', () => ({
     open: ledger.openPositions().map((p) => ({ ...p, currentMultiple: ledger.currentMultiple(p) })),
     closed: ledger.closedPositions().slice(0, 50),
+    stranded: ledger.strandedPositions(),
+    strandedCostUsd: ledger.strandedCostUsd(),
   }));
 
   api.get('/api/launches', () => ({

@@ -24,6 +24,8 @@ export interface EvaluationReport {
   netPnlPct: number;
   maxDrawdownPct: number;
   honeypotEntryRate: number;
+  stranded: number;
+  strandedRate: number;
   criteria: Criterion[];
   verdict: 'go' | 'no-go' | 'in-progress';
 }
@@ -49,6 +51,8 @@ export function evaluateRun(params: {
   closedPositions: Position[];
   /** Entries that vetting should have caught. Measures filter quality, not P&L. */
   honeypotEntries: number;
+  /** Positions left unsellable because the curve graduated before the exit fired. */
+  strandedPositions: number;
 }): EvaluationReport {
   const { config, startedAt, startingEquityUsd, currentEquityUsd, closedPositions } = params;
   const gates = config.bot.evaluation;
@@ -64,6 +68,12 @@ export function evaluateRun(params: {
   const netPnlUsd = currentEquityUsd - startingEquityUsd;
   const netPnlPct = startingEquityUsd > 0 ? (netPnlUsd / startingEquityUsd) * 100 : 0;
   const honeypotEntryRate = trades > 0 ? params.honeypotEntries / trades : 0;
+
+  // Denominated over every position that reached a terminal state, not just the closed
+  // ones — a stranding never becomes a closed trade, so dividing by `trades` alone would
+  // let the rate fall as strandings accumulated.
+  const terminalPositions = trades + params.strandedPositions;
+  const strandedRate = terminalPositions > 0 ? params.strandedPositions / terminalPositions : 0;
 
   const criteria: Criterion[] = [
     {
@@ -108,6 +118,13 @@ export function evaluateRun(params: {
       actual: `${(honeypotEntryRate * 100).toFixed(1)}%`,
       met: honeypotEntryRate <= gates.maxHoneypotEntryRate,
     },
+    {
+      id: 'stranded',
+      label: 'Positions stranded by graduation',
+      target: `<= ${(gates.maxStrandedRate * 100).toFixed(1)}%`,
+      actual: `${(strandedRate * 100).toFixed(1)}% (${params.strandedPositions})`,
+      met: strandedRate <= gates.maxStrandedRate,
+    },
   ];
 
   const allMet = criteria.every((c) => c.met);
@@ -125,6 +142,8 @@ export function evaluateRun(params: {
     netPnlPct,
     maxDrawdownPct: params.maxDrawdownPct,
     honeypotEntryRate,
+    stranded: params.strandedPositions,
+    strandedRate,
     criteria,
     // A run that has not finished its window is never a "go", however good it looks.
     verdict: !windowComplete ? 'in-progress' : allMet ? 'go' : 'no-go',

@@ -114,7 +114,8 @@
     "minWinRate": 0.4,
     "maxDrawdownPct": 20,
     "minNetPnlPct": 5,
-    "maxHoneypotEntryRate": 0.02
+    "maxHoneypotEntryRate": 0.02,
+    "maxStrandedRate": 0.05
   },
 
   "api": {

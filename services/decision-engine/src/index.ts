@@ -211,6 +211,9 @@ export class DecisionEngine {
     // Confirmation scales an existing scout. Without one there is no entry price to
     // build on, and the token would be bought at whatever the run has already reached.
     if (!position) return;
+    // A stranded position is unsellable, so adding to it buys more of something that
+    // cannot be exited.
+    if (position.status !== 'open') return;
 
     const view = this.deps.launchView(token);
     if (!view || view.graduated || view.swept) return;
