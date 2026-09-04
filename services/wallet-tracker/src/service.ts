@@ -248,8 +248,15 @@ export class WalletTrackerService {
     // scored as clean — an unknown is not evidence of independence.
     const buyerComponent = clamp01(uniqueBuyerCount / (walletTracker.minUniqueBuyers * 2));
     const velocityComponent = clamp01(uniqueBuyerVelocity / (walletTracker.minUniqueBuyerVelocity * 2));
-    const concentrationComponent = clamp01(1 - concentrationScore / Math.max(0.01, walletTracker.maxConcentrationScore));
-    const fundingComponent = 1 - sharedFundingVolumeShare;
+
+    // Concentration and shared funding both score the *absence* of a bad pattern, so on
+    // a token nobody has bought they read as perfectly clean and hand an untouched
+    // launch a respectable score. Both are therefore scaled by how many buyers actually
+    // back the measurement: no observations, no credit.
+    const evidence = clamp01(uniqueBuyerCount / walletTracker.minUniqueBuyers);
+    const concentrationComponent =
+      clamp01(1 - concentrationScore / Math.max(0.01, walletTracker.maxConcentrationScore)) * evidence;
+    const fundingComponent = (1 - sharedFundingVolumeShare) * evidence;
     const coverageCeiling = 0.6 + 0.4 * fundingCoverage;
 
     const authenticityScore = clamp01(

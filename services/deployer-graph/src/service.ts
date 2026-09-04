@@ -85,7 +85,7 @@ export class DeployerGraphService {
 
     // Outcomes are graded on a timer rather than on an event, because "nothing happened"
     // is itself an outcome and produces no event to react to.
-    this.evaluationTimer = setInterval(() => this.evaluatePending(), 60_000);
+    this.evaluationTimer = setInterval(() => this.gradePendingLaunches(), 60_000);
 
     this.refreshStats();
     log.info('deployer graph started', {
@@ -183,7 +183,7 @@ export class DeployerGraphService {
    * quiet is stalled. One that barely moved is a dud — and on this launchpad "dumped"
    * means abandoned rather than rugged, since liquidity cannot be pulled from a curve.
    */
-  private evaluatePending(): void {
+  gradePendingLaunches(): void {
     const cutoff = Date.now() - this.config.bot.deployerGraph.outcomeEvaluationMinutes * 60_000;
     const rows = this.db.all<LaunchRow>(
       "SELECT * FROM launches WHERE outcome = 'pending' AND launched_at < ? LIMIT 500",
