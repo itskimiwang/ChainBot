@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { UsdPriceOracle } from '@rhc/core';
+import { PRICE_SCALE, priceOf } from '@rhc/chain';
+import { openDb, UsdPriceOracle } from '@rhc/core';
 import type { Fill, QuoteAsset } from '@rhc/types';
 import { PortfolioLedger } from './ledger.js';
 
@@ -46,7 +47,8 @@ function fill(overrides: Partial<Fill> = {}): Fill {
     quoteAsset: ETH,
     quoteAmount: '1000000000000000000',
     tokenAmount: '1000000000000000000000',
-    price: '1000000000000000',
+    // 1 ETH for 1000 tokens -> 0.001 ETH each.
+    price: priceOf(10n ** 18n, 10n ** 21n).toString(),
     slippageBps: 0,
     feePaid: '0',
     taxPaid: '0',
@@ -108,8 +110,45 @@ describe('position accounting', () => {
 
     expect(position.quoteInvested).toBe('4000000000000000000');
     expect(position.tokensHeld).toBe('2000000000000000000000');
-    // 4 ETH for 2000 tokens -> 0.002 ETH each.
-    expect(position.averageEntryPrice).toBe('2000000000000000');
+    // 4 ETH for 2000 tokens -> 0.002 ETH each, PRICE_SCALE-scaled.
+    expect(position.averageEntryPrice).toBe((2_000_000_000_000_000n * PRICE_SCALE).toString());
+  });
+
+  it('reports a flat position as flat when the quote asset has few decimals', () => {
+    // A 1B-supply token quoted in 6-decimal USDG costs a few millionths of a USDG per
+    // token. Prices used to be stored unscaled, so entry and mark both truncated to the
+    // integer 3: the multiple read 1.00x while the P&L read -25% on the same position,
+    // and the ladder could not express any move smaller than a 33% jump.
+    const { ledger } = build();
+    ledger.fundVirtual([USDG]);
+
+    const quoteAmount = '8023698';
+    const tokenAmount = '2016471992171687567845015';
+    const entry = priceOf(BigInt(quoteAmount), BigInt(tokenAmount));
+    const position = open(ledger, fill({ quoteAsset: USDG, quoteAmount, tokenAmount, price: entry.toString() }));
+
+    const marked = ledger.updateMark(position.positionId, entry, entry)!;
+
+    expect(marked.unrealizedPnlQuote).toBe('0');
+    expect(ledger.currentMultiple(marked)).toBeCloseTo(1, 6);
+  });
+
+  it('resolves a one-percent move on a low-decimal quote asset', () => {
+    const { ledger } = build();
+    ledger.fundVirtual([USDG]);
+
+    const quoteAmount = '8023698';
+    const tokenAmount = '2016471992171687567845015';
+    const entry = priceOf(BigInt(quoteAmount), BigInt(tokenAmount));
+    const position = open(ledger, fill({ quoteAsset: USDG, quoteAmount, tokenAmount, price: entry.toString() }));
+
+    const up = (entry * 101n) / 100n;
+    const marked = ledger.updateMark(position.positionId, up, up)!;
+
+    // Multiples carry 1bp resolution, so 1.01x is the nearest representable value.
+    // Unscaled, the nearest representable move on this position was 1.33x.
+    expect(ledger.currentMultiple(marked)).toBeCloseTo(1.01, 3);
+    expect(marked.peakMultiple).toBeCloseTo(1.01, 3);
   });
 
   it('releases cost basis in proportion to the tokens sold', () => {
@@ -164,8 +203,9 @@ describe('position accounting', () => {
     ledger.fundVirtual([ETH]);
     const position = open(ledger);
 
-    ledger.updateMark(position.positionId, 3_000_000_000_000_000n, 3_000_000_000_000_000n);
-    ledger.updateMark(position.positionId, 1_500_000_000_000_000n, 1_500_000_000_000_000n);
+    const entry = BigInt(position.averageEntryPrice);
+    ledger.updateMark(position.positionId, entry * 3n, entry * 3n);
+    ledger.updateMark(position.positionId, (entry * 3n) / 2n, (entry * 3n) / 2n);
 
     const current = ledger.getPosition(position.positionId)!;
     expect(current.peakMultiple).toBe(3);
@@ -248,5 +288,34 @@ describe('durability', () => {
 
     expect(ledger.openPositions().map((p) => p.positionId)).toEqual([kept.positionId]);
     expect(ledger.strandedPositions().map((p) => p.positionId)).toEqual([lost.positionId]);
+  });
+
+  it('rescales prices written before they were fixed-point', () => {
+    // A ledger from before the scaling change holds prices 1e18 too small. Restoring
+    // one as-is would mark the position at essentially zero and book an instant total
+    // loss, so the migration has to bring old rows onto the current scale.
+    const dbPath = join(tempDir, 'ledger.sqlite');
+    const { ledger: first } = build();
+    first.fundVirtual([ETH]);
+    const before = open(first);
+    first.close();
+
+    const db = openDb(dbPath);
+    const row = db.get<{ payload: string }>('SELECT payload FROM positions WHERE position_id = ?', before.positionId)!;
+    const legacy = JSON.parse(row.payload) as Record<string, string>;
+    for (const field of ['averageEntryPrice', 'lastPrice', 'markPrice']) {
+      legacy[field] = (BigInt(legacy[field]!) / PRICE_SCALE).toString();
+    }
+    db.run('UPDATE positions SET payload = ? WHERE position_id = ?', JSON.stringify(legacy), before.positionId);
+    db.run("DELETE FROM _migrations WHERE namespace = 'ledger' AND idx = 2");
+    db.close();
+
+    const oracle = new UsdPriceOracle('derive-from-graduation-threshold', 'USDG', {});
+    oracle.ingest([USDG, ETH]);
+    ledger = new PortfolioLedger(dbPath, 'paper', 1_000, oracle);
+
+    const [restored] = ledger.openPositions();
+    expect(restored!.averageEntryPrice).toBe(before.averageEntryPrice);
+    expect(restored!.markPrice).toBe(before.markPrice);
   });
 });

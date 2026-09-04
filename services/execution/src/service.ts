@@ -5,6 +5,7 @@ import {
   erc20Abi,
   fillSlippageBps,
   ponsV2CurveAbi,
+  priceOf,
   quoteBuy,
   quoteSell,
   realizablePrice,
@@ -148,7 +149,7 @@ export class ExecutionService {
     }
 
     const spot = spotPrice(snapshot);
-    const executedPrice = (quote.spent * 10n ** 18n) / quote.tokensOut;
+    const executedPrice = priceOf(quote.spent, quote.tokensOut);
     const slippageBps = fillSlippageBps(spot, executedPrice, 'buy');
 
     if (slippageBps > intent.maxSlippageBps) {
@@ -247,7 +248,7 @@ export class ExecutionService {
     }
 
     const spot = spotPrice(snapshot);
-    const executedPrice = (quote.quoteOut * 10n ** 18n) / tokensIn;
+    const executedPrice = priceOf(quote.quoteOut, tokensIn);
     const slippageBps = fillSlippageBps(spot, executedPrice, 'sell');
     const minQuoteOut = (quote.quoteOut * BigInt(10_000 - intent.maxSlippageBps)) / 10_000n;
 

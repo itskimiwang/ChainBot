@@ -1,4 +1,4 @@
-import { graduationProgress, sellImpactBps } from '@rhc/chain';
+import { graduationProgress, sellImpactBps, tokensForQuote } from '@rhc/chain';
 import { createLogger, mutex, type AppConfig, type MessageBus, type UsdPriceOracle } from '@rhc/core';
 import type { ExecutionService, PortfolioLedger } from '@rhc/execution';
 import type { RiskManager } from '@rhc/risk-manager';
@@ -141,9 +141,8 @@ export class ExitEngineService {
     const impactBpsOfOwnSize = sellImpactBps(marked.snapshot, ownSizeTokens);
 
     const referenceQuote = this.deps.oracle.fromUsd(config.bot.exit.depthStopReferenceTradeUsd, updated.quoteAsset);
-    const markPrice = BigInt(updated.markPrice);
     const referenceTokens =
-      referenceQuote != null && markPrice > 0n ? (referenceQuote * 10n ** 18n) / markPrice : 0n;
+      referenceQuote != null ? tokensForQuote(referenceQuote, BigInt(updated.markPrice)) : 0n;
     const impactBpsOfReferenceTrade = sellImpactBps(marked.snapshot, referenceTokens);
 
     const decision =

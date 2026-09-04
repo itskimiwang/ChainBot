@@ -62,10 +62,17 @@ export function openDb(path: string): Db {
 }
 
 /**
+ * A migration step: raw SQL, or a function for rewrites SQLite cannot express. Rescaling
+ * a fixed-point field inside a JSON payload is the motivating case — the values overflow
+ * SQLite's 64-bit INTEGER, so the arithmetic has to happen in bigint.
+ */
+export type Migration = string | ((db: Db) => void);
+
+/**
  * Minimal forward-only migrations. Each entry runs once, in order, recorded by index.
  * Never edit a shipped migration — append a new one.
  */
-export function migrate(db: Db, namespace: string, migrations: string[]): void {
+export function migrate(db: Db, namespace: string, migrations: Migration[]): void {
   db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
     namespace TEXT NOT NULL,
     idx       INTEGER NOT NULL,
@@ -77,10 +84,11 @@ export function migrate(db: Db, namespace: string, migrations: string[]): void {
     db.all<{ idx: number }>('SELECT idx FROM _migrations WHERE namespace = ?', namespace).map((r) => r.idx),
   );
 
-  for (const [idx, sql] of migrations.entries()) {
+  for (const [idx, step] of migrations.entries()) {
     if (applied.has(idx)) continue;
     db.transaction(() => {
-      db.exec(sql);
+      if (typeof step === 'string') db.exec(step);
+      else step(db);
       db.run('INSERT INTO _migrations (namespace, idx, applied_at) VALUES (?, ?, ?)', namespace, idx, Date.now());
     });
     log.info('applied migration', { namespace, idx });

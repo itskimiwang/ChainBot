@@ -263,7 +263,7 @@ export const FillSchema = z.object({
   quoteAsset: QuoteAssetSchema,
   quoteAmount: BaseUnitsSchema,
   tokenAmount: BaseUnitsSchema,
-  /** Quote base units per whole token, as a decimal string. */
+  /** Quote base units per whole token, `PRICE_SCALE`-scaled, as a decimal string. */
   price: z.string(),
   /** Realised gap between the marginal spot price and the achieved fill price. */
   slippageBps: z.number(),
@@ -309,6 +309,7 @@ export const PositionSchema = z.object({
   /** Quote base units committed, net of any partial exits. */
   quoteInvested: BaseUnitsSchema,
   tokensHeld: BaseUnitsSchema,
+  /** All three prices are quote base units per whole token, `PRICE_SCALE`-scaled. */
   averageEntryPrice: z.string(),
   /** Marginal spot from curve reserves; display-only, carries no slippage. */
   lastPrice: z.string(),

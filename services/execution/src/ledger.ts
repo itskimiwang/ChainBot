@@ -1,8 +1,37 @@
+import { PRICE_SCALE, priceOf, quoteValueOf } from '@rhc/chain';
 import { formatUnits, migrate, newId, openDb, type Db, type UsdPriceOracle } from '@rhc/core';
 import { createLogger } from '@rhc/core';
 import type { EntryStage, ExitReason, Fill, LaunchPhase, Position, QuoteAsset, TradingMode } from '@rhc/types';
 
 const log = createLogger('ledger');
+
+/**
+ * Prices were originally stored as plain quote base units per whole token. That carries
+ * about one significant figure under a 6-decimal quote asset, so they are now scaled by
+ * `PRICE_SCALE`. Rows written before the change have to be brought onto the same scale
+ * or a restart would mark every restored position at ~1e-18 of its real value.
+ */
+function rescalePricesToFixedPoint(db: Db): void {
+  const scale = (value: unknown): string =>
+    typeof value === 'string' && /^\d+$/.test(value) ? (BigInt(value) * PRICE_SCALE).toString() : String(value ?? '0');
+
+  for (const row of db.all<{ position_id: string; payload: string }>('SELECT position_id, payload FROM positions')) {
+    const position = JSON.parse(row.payload) as Record<string, unknown>;
+    for (const field of ['averageEntryPrice', 'lastPrice', 'markPrice']) {
+      position[field] = scale(position[field]);
+    }
+    for (const fill of (position.fills ?? []) as Record<string, unknown>[]) {
+      fill.price = scale(fill.price);
+    }
+    db.run('UPDATE positions SET payload = ? WHERE position_id = ?', JSON.stringify(position), row.position_id);
+  }
+
+  for (const row of db.all<{ fill_id: string; payload: string }>('SELECT fill_id, payload FROM fills')) {
+    const fill = JSON.parse(row.payload) as Record<string, unknown>;
+    fill.price = scale(fill.price);
+    db.run('UPDATE fills SET payload = ? WHERE fill_id = ?', JSON.stringify(fill), row.fill_id);
+  }
+}
 
 /**
  * The portfolio ledger. One implementation, used by both modes.
@@ -53,6 +82,7 @@ export class PortfolioLedger {
          created_at INTEGER NOT NULL
        );
        CREATE INDEX idx_fills_position ON fills(position_id);`,
+      rescalePricesToFixedPoint,
     ]);
 
     this.restore();
@@ -125,7 +155,7 @@ export class PortfolioLedger {
 
     for (const position of this.positions.values()) {
       if (position.status === 'closed' || position.status === 'stranded') continue;
-      const markValue = (BigInt(position.tokensHeld) * BigInt(position.markPrice)) / 10n ** 18n;
+      const markValue = quoteValueOf(BigInt(position.tokensHeld), BigInt(position.markPrice));
       total += this.oracle.toUsd(markValue, position.quoteAsset) ?? 0;
     }
 
@@ -239,7 +269,7 @@ export class PortfolioLedger {
       existing.tokensHeld = newTokens.toString();
       existing.quoteInvested = newInvested.toString();
       existing.averageEntryPrice =
-        newTokens > 0n ? ((newInvested * 10n ** 18n) / newTokens).toString() : existing.averageEntryPrice;
+        newTokens > 0n ? priceOf(newInvested, newTokens).toString() : existing.averageEntryPrice;
       existing.stage = stage;
       existing.fills.push(fill);
       this.persist(existing);
@@ -335,8 +365,7 @@ export class PortfolioLedger {
       if (multiple > position.peakMultiple) position.peakMultiple = multiple;
     }
 
-    const tokens = BigInt(position.tokensHeld);
-    const markValue = (tokens * markPrice) / 10n ** 18n;
+    const markValue = quoteValueOf(BigInt(position.tokensHeld), markPrice);
     position.unrealizedPnlQuote = (markValue - BigInt(position.quoteInvested)).toString();
 
     this.persist(position);

@@ -4,11 +4,15 @@ import {
   amountOut,
   fillSlippageBps,
   graduationProgress,
+  PRICE_SCALE,
+  priceOf,
   quoteBuy,
   quoteSell,
+  quoteValueOf,
   realizablePrice,
   sellImpactBps,
   spotPrice,
+  tokensForQuote,
   type CurveState,
 } from './curve-math.js';
 
@@ -157,7 +161,7 @@ describe('quoteSell', () => {
 describe('marks', () => {
   it('derives spot from the pricing reserves, including the phantom balance', () => {
     const state = curve({ quoteReserve: 2n * ETH, tokenReserve: 1_000_000n * ETH });
-    expect(spotPrice(state)).toBe((2n * ETH * ETH) / (1_000_000n * ETH));
+    expect(spotPrice(state)).toBe((2n * ETH * ETH * PRICE_SCALE) / (1_000_000n * ETH));
   });
 
   it('reports zero spot on an empty curve rather than dividing by zero', () => {
@@ -177,6 +181,54 @@ describe('marks', () => {
     const small = realizablePrice(state, 1_000_000n * ETH);
     const large = realizablePrice(state, 200_000_000n * ETH);
     expect(large).toBeLessThan(small);
+  });
+});
+
+describe('price scaling', () => {
+  // A 1B-supply token quoted in 6-decimal USDG is worth a few millionths of a USDG, so
+  // an unscaled price would be a single-digit integer and every derived number — the
+  // multiple, the ladder rung, the stop distance — would be rounding error. These pin
+  // the resolution that keeps a low-decimal quote asset as precise as an 18-decimal one.
+  const USDG_PAID = 8_023_698n; // 8.023698 USDG
+  const TOKENS = 2_016_471_992_171_687_567_845_015n; // ~2.016M whole tokens
+
+  it('keeps a sub-base-unit token price precise under a 6-decimal quote asset', () => {
+    const price = priceOf(USDG_PAID, TOKENS);
+
+    // True price is ~3.979 base units per whole token. Unscaled this truncates to 3,
+    // a 25% error; scaled it survives to well beyond the precision anything needs.
+    expect(Number(price) / Number(PRICE_SCALE)).toBeCloseTo(3.9791, 4);
+  });
+
+  it('round-trips a holding back to what was paid for it', () => {
+    const price = priceOf(USDG_PAID, TOKENS);
+    const value = quoteValueOf(TOKENS, price);
+
+    // Marking the position at its own entry price must reproduce the cost basis. Before
+    // scaling this returned 6049415 against 8023698 paid: a 25% loss out of thin air.
+    expect(value).toBe(USDG_PAID);
+  });
+
+  it('resolves a one-percent move on a low-decimal quote asset', () => {
+    const entry = priceOf(USDG_PAID, TOKENS);
+    const up = priceOf((USDG_PAID * 101n) / 100n, TOKENS);
+
+    expect(Number(up) / Number(entry)).toBeCloseTo(1.01, 4);
+  });
+
+  it('inverts back to the size that quote would buy', () => {
+    const price = priceOf(USDG_PAID, TOKENS);
+    const recovered = tokensForQuote(USDG_PAID, price);
+
+    expect(Number(recovered) / Number(TOKENS)).toBeCloseTo(1, 9);
+  });
+
+  it('treats an empty side as zero rather than dividing by zero', () => {
+    expect(priceOf(1n, 0n)).toBe(0n);
+    expect(quoteValueOf(0n, 1n)).toBe(0n);
+    expect(quoteValueOf(1n, 0n)).toBe(0n);
+    expect(tokensForQuote(1n, 0n)).toBe(0n);
+    expect(tokensForQuote(0n, 1n)).toBe(0n);
   });
 });
 
@@ -201,14 +253,26 @@ describe('sellImpactBps', () => {
     expect(sellImpactBps(state, 100_000_000n * ETH)).toBeGreaterThan(sellImpactBps(state, 1_000_000n * ETH));
   });
 
-  it('is smaller on a deeper curve for the same size', () => {
+  it('is smaller on a curve holding more tokens, for the same size', () => {
     // The whole premise of the depth-aware stop: identical sells mean different things
     // at different reserve levels.
-    const thin = curve({ quoteReserve: 1n * ETH, tokenReserve: 900_000_000n * ETH });
-    const deep = curve({ quoteReserve: 20n * ETH, tokenReserve: 900_000_000n * ETH });
+    const thin = curve({ tokenReserve: 300_000_000n * ETH });
+    const deep = curve({ tokenReserve: 900_000_000n * ETH });
     const size = 50_000_000n * ETH;
 
     expect(sellImpactBps(deep, size)).toBeLessThan(sellImpactBps(thin, size));
+  });
+
+  it('does not move with the quote reserve, which cancels out of the ratio', () => {
+    // Impact is `1 - (1 - fee) * T / (T + x)`: the quote reserve sets the price level but
+    // divides out of the ratio entirely. Depth for a *sell* is the token reserve alone.
+    // The depth-aware stop still sees quote depth, because it sizes its reference trade
+    // in USD and converts at the mark, which is where the quote reserve enters.
+    const size = 50_000_000n * ETH;
+    const low = curve({ quoteReserve: 1n * ETH, tokenReserve: 900_000_000n * ETH });
+    const high = curve({ quoteReserve: 20n * ETH, tokenReserve: 900_000_000n * ETH });
+
+    expect(sellImpactBps(high, size)).toBe(sellImpactBps(low, size));
   });
 
   it('is never negative, and is zero for an empty sell or an empty curve', () => {

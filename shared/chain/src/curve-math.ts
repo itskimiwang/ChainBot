@@ -1,4 +1,4 @@
-import { bigintMin, ceilDiv, clamp01, ratio } from '@rhc/core';
+import { bigintMin, ceilDiv, clamp01, divRound, ratio } from '@rhc/core';
 
 /**
  * Pons V2 bonding-curve pricing, reimplemented locally.
@@ -123,12 +123,42 @@ export function quoteSell(state: CurveState, tokensIn: bigint): SellQuote {
 }
 
 /**
- * Marginal price of one whole token in quote base units. Display only — it carries no
+ * Fixed-point scale for every price in this system.
+ *
+ * A price is quote base units per whole token, multiplied by `PRICE_SCALE`. The scale is
+ * not cosmetic: a 1B-supply token quoted in a 6-decimal asset like USDG costs single
+ * digits of base units per whole token, so an unscaled integer price carries about one
+ * significant figure. At that resolution the smallest representable move is tens of
+ * percent, entry and mark round to the same number while the position is visibly up or
+ * down, and every multiple, ladder rung and stop derived from them is quantisation
+ * noise. Scaling first keeps low-decimal quote assets as precise as 18-decimal ones.
+ */
+export const PRICE_SCALE = 10n ** 18n;
+
+/** Price per whole token implied by a fill or a reserve ratio. */
+export function priceOf(quoteAmount: bigint, tokenAmount: bigint, tokenDecimals = 18): bigint {
+  if (tokenAmount <= 0n) return 0n;
+  return divRound(quoteAmount * 10n ** BigInt(tokenDecimals) * PRICE_SCALE, tokenAmount);
+}
+
+/** Quote base units that `tokenAmount` is worth at `price`. Inverse of `priceOf`. */
+export function quoteValueOf(tokenAmount: bigint, price: bigint, tokenDecimals = 18): bigint {
+  if (tokenAmount <= 0n || price <= 0n) return 0n;
+  return divRound(tokenAmount * price, 10n ** BigInt(tokenDecimals) * PRICE_SCALE);
+}
+
+/** Token base units that `quoteAmount` buys at `price`. Inverse of `quoteValueOf`. */
+export function tokensForQuote(quoteAmount: bigint, price: bigint, tokenDecimals = 18): bigint {
+  if (quoteAmount <= 0n || price <= 0n) return 0n;
+  return divRound(quoteAmount * 10n ** BigInt(tokenDecimals) * PRICE_SCALE, price);
+}
+
+/**
+ * Marginal price of one whole token, `PRICE_SCALE`-scaled. Display only — it carries no
  * slippage, so sizing or P&L computed from it will be optimistic.
  */
 export function spotPrice(state: CurveState, tokenDecimals = 18): bigint {
-  if (state.tokenReserve === 0n) return 0n;
-  return (state.quoteReserve * 10n ** BigInt(tokenDecimals)) / state.tokenReserve;
+  return priceOf(state.quoteReserve, state.tokenReserve, tokenDecimals);
 }
 
 /**
@@ -139,7 +169,7 @@ export function spotPrice(state: CurveState, tokenDecimals = 18): bigint {
 export function realizablePrice(state: CurveState, tokensHeld: bigint, tokenDecimals = 18): bigint {
   if (tokensHeld <= 0n) return 0n;
   const { quoteOut } = quoteSell(state, tokensHeld);
-  return (quoteOut * 10n ** BigInt(tokenDecimals)) / tokensHeld;
+  return priceOf(quoteOut, tokensHeld, tokenDecimals);
 }
 
 /**

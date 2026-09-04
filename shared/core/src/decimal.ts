@@ -45,6 +45,22 @@ export function ceilDiv(a: bigint, b: bigint): bigint {
   return (a + b - 1n) / b;
 }
 
+/**
+ * Division rounded to nearest, ties away from zero.
+ *
+ * Flooring a derived quantity biases it one way every single time. On a fixed-point
+ * price that shows up as a phantom loss on every position the moment it opens, so
+ * anything we derive ourselves (as opposed to mirroring contract arithmetic, which must
+ * truncate exactly as the contract does) rounds instead.
+ */
+export function divRound(a: bigint, b: bigint): bigint {
+  if (b === 0n) throw new Error('division by zero');
+  const negative = a < 0n !== b < 0n;
+  const [absA, absB] = [a < 0n ? -a : a, b < 0n ? -b : b];
+  const quotient = (absA + absB / 2n) / absB;
+  return negative ? -quotient : quotient;
+}
+
 export function bigintMin(a: bigint, b: bigint): bigint {
   return a < b ? a : b;
 }
