@@ -37,7 +37,7 @@ within a few seconds.
 Run them separately with `npm run dev:bot` and `npm run dev:ui`.
 
 ```bash
-npm test        # 135 tests
+npm test        # 140 tests
 npm run lint    # typecheck + tests
 ```
 
@@ -105,7 +105,10 @@ into an unrecoverable one.
 
 **Exit engine** runs a take-profit ladder, a trailing stop that widens as the multiple
 grows, and a liquidity-aware stop computed from curve reserve depth. Stops must persist
-for several seconds and blocks before firing; take-profits fire immediately.
+for several seconds and blocks before firing; take-profits fire immediately, and so does
+any stop breached far enough past its own threshold that waiting could not reclassify it.
+Positions are re-marked when the scanner reports a sell on them, not only on the refresh
+interval — the curve can drain faster than the loop samples.
 
 ---
 
