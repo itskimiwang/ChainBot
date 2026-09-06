@@ -30,8 +30,17 @@ export interface CurveState {
   graduationThreshold: bigint;
 }
 
+/**
+ * Constant-product output.
+ *
+ * Both reserves must be positive for the invariant to mean anything. An empty
+ * `reserveIn` is the dangerous case: the formula degenerates to `reserveOut`, so a swept
+ * curve would price *any* sell at its entire remaining quote balance and mark the
+ * position at a multiple that no trade could ever realise. There is no price here, so
+ * this reports none rather than an enormous one.
+ */
 export function amountOut(inAmount: bigint, reserveIn: bigint, reserveOut: bigint): bigint {
-  if (inAmount <= 0n) return 0n;
+  if (inAmount <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
   return (inAmount * reserveOut) / (reserveIn + inAmount);
 }
 

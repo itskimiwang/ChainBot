@@ -57,6 +57,14 @@ describe('constant-product primitives', () => {
   it('refuses to price a withdrawal of the entire output reserve', () => {
     expect(() => amountIn(100n, 10n, 100n)).toThrow(/exceeds reserve/);
   });
+
+  it('reports no output against an empty reserve on either side', () => {
+    // The dangerous half is an empty `reserveIn`: the formula degenerates to the whole
+    // of `reserveOut`, so a swept curve would price any sell at its entire remaining
+    // balance. An observed position marked at 135x its entry that way.
+    expect(amountOut(50n, 0n, 100n)).toBe(0n);
+    expect(amountOut(50n, 10n, 0n)).toBe(0n);
+  });
 });
 
 describe('quoteBuy', () => {
@@ -167,6 +175,15 @@ describe('marks', () => {
   it('reports zero spot on an empty curve rather than dividing by zero', () => {
     expect(spotPrice(curve({ tokenReserve: 0n }))).toBe(0n);
     expect(realizablePrice(curve(), 0n)).toBe(0n);
+  });
+
+  it('reports no mark on a swept curve instead of an enormous one', () => {
+    // Post-sweep the curve holds no tokens. Marking a holding against it must not come
+    // back with the curve's whole quote balance as the proceeds of any sell.
+    const swept = curve({ tokenReserve: 0n });
+
+    expect(quoteSell(swept, 1_000_000n * ETH).quoteOut).toBe(0n);
+    expect(realizablePrice(swept, 1_000_000n * ETH)).toBe(0n);
   });
 
   it('marks a position below spot, because selling it moves the price', () => {

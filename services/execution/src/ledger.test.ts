@@ -151,6 +151,23 @@ describe('position accounting', () => {
     expect(marked.peakMultiple).toBeCloseTo(1.01, 3);
   });
 
+  it('keeps the last mark when the curve cannot price a sale', () => {
+    // A swept curve returns no proceeds at any size. That is "no price available", not
+    // "worth zero": writing it in would report a -100% drawdown and trip every stop.
+    const { ledger } = build();
+    ledger.fundVirtual([ETH]);
+    const position = open(ledger);
+    const entry = BigInt(position.averageEntryPrice);
+
+    const up = entry * 2n;
+    ledger.updateMark(position.positionId, up, up);
+    const after = ledger.updateMark(position.positionId, 0n, 0n)!;
+
+    expect(after.markPrice).toBe(up.toString());
+    expect(after.peakMultiple).toBeCloseTo(2, 4);
+    expect(ledger.currentMultiple(after)).toBeCloseTo(2, 4);
+  });
+
   it('releases cost basis in proportion to the tokens sold', () => {
     // A laddered exit must realise its share of the entry, not all of it on the first
     // rung — otherwise the first sale books the entire loss or gain.

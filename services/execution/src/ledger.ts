@@ -350,14 +350,22 @@ export class PortfolioLedger {
     return position;
   }
 
-  /** Refresh the mark and peak multiple from current chain state. */
+  /**
+   * Refresh the mark and peak multiple from current chain state.
+   *
+   * A non-positive mark means the curve could not price a sale at all, which is not the
+   * same as the position being worthless: writing it in would ratchet nothing but would
+   * report a -100% drawdown and trip every stop at once. The previous mark is kept and
+   * the caller decides what an unpriceable curve means.
+   */
   updateMark(positionId: string, markPrice: bigint, lastPrice: bigint, phase?: LaunchPhase): Position | null {
     const position = this.positions.get(positionId);
     if (!position || position.status === 'closed' || position.status === 'stranded') return null;
+    if (phase) position.phase = phase;
+    if (markPrice <= 0n) return position;
 
     position.markPrice = markPrice.toString();
     position.lastPrice = lastPrice.toString();
-    if (phase) position.phase = phase;
 
     const entry = BigInt(position.averageEntryPrice);
     if (entry > 0n) {

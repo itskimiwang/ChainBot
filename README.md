@@ -37,7 +37,7 @@ within a few seconds.
 Run them separately with `npm run dev:bot` and `npm run dev:ui`.
 
 ```bash
-npm test        # 140 tests
+npm test        # 143 tests
 npm run lint    # typecheck + tests
 ```
 

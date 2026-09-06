@@ -155,7 +155,11 @@ export class ExitEngineService {
     // phase. Exiting from here needs the Uniswap v4 route, which does not exist yet, so
     // the position is marked stranded exactly once. Retrying would re-alert on every
     // tick and hold a concurrency slot for the lifetime of the process.
-    if (marked.snapshot.readyToGraduate || marked.snapshot.graduated) {
+    //
+    // A curve that cannot price a sale at all is the same situation reached by a
+    // different route, and it arrives *before* the flags flip: the sweep empties the
+    // reserves, and there is no size at which the position can be sold.
+    if (marked.snapshot.readyToGraduate || marked.snapshot.graduated || marked.mark <= 0n) {
       const stranded = this.deps.ledger.markStranded(
         updated.positionId,
         `curve closed to sells at ${currentMultiple.toFixed(2)}x`,
