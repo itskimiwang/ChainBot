@@ -212,6 +212,15 @@ const BotConfigSchema = z.object({
      */
     stopPersistenceSeconds: z.number().positive(),
     stopPersistenceBlocks: z.number().int().positive(),
+    /**
+     * Fire a stop immediately once the breach is this multiple of its own threshold.
+     *
+     * Persistence exists to tell single-wallet noise from real selling. Past a certain
+     * depth that question is already answered, and waiting only sells lower: a curve can
+     * give up its entire reserve in well under the persistence window, so a position that
+     * tripped its trail at 1.5x can be at 0.3x by the time the wait expires.
+     */
+    persistenceBypassMultiplier: z.number().min(1),
     /** Share of the position used when measuring our own exit's price impact. */
     depthAwareStopSizeFraction: z.number().min(0).max(1),
     /**

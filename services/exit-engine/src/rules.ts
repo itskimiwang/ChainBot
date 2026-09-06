@@ -68,6 +68,8 @@ export function evaluateTrailingStop(
   const triggerMultiple = position.peakMultiple * (1 - trailPct / 100);
   if (currentMultiple > triggerMultiple) return null;
 
+  const dropFromPeakPct = (1 - currentMultiple / position.peakMultiple) * 100;
+
   return {
     reason: 'trailing-stop',
     fraction: 1,
@@ -75,8 +77,16 @@ export function evaluateTrailingStop(
     detail:
       `fell to ${currentMultiple.toFixed(2)}x from a peak of ${position.peakMultiple.toFixed(2)}x ` +
       `(trail ${trailPct.toFixed(0)}%)`,
-    requiresPersistence: true,
+    requiresPersistence: !isBeyondNoise(config, dropFromPeakPct, trailPct),
   };
+}
+
+/**
+ * Whether a breach is deep enough that waiting out the persistence window cannot tell us
+ * anything we do not already know.
+ */
+function isBeyondNoise(config: BotConfig, observedPct: number, thresholdPct: number): boolean {
+  return observedPct >= thresholdPct * config.exit.persistenceBypassMultiplier;
 }
 
 /**
@@ -134,7 +144,7 @@ export function evaluateDepthAwareStop(
       fraction: 1,
       ladderStep: null,
       detail: `down ${drawdownPct.toFixed(1)}% from entry, past the ${config.exit.hardStopPct}% hard stop`,
-      requiresPersistence: true,
+      requiresPersistence: !isBeyondNoise(config, drawdownPct, config.exit.hardStopPct),
     };
   }
 
@@ -147,7 +157,7 @@ export function evaluateDepthAwareStop(
       detail:
         `down ${drawdownPct.toFixed(1)}%, deeper than the ${floor.toFixed(1)}% that ordinary ` +
         'single-wallet selling explains at current curve depth',
-      requiresPersistence: true,
+      requiresPersistence: !isBeyondNoise(config, drawdownPct, floor),
     };
   }
 

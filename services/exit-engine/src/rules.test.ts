@@ -145,6 +145,22 @@ describe('trailing stop', () => {
     expect(decision?.requiresPersistence).toBe(true);
   });
 
+  it('stops waiting once the drop is far past the trail', () => {
+    // A position that peaked at 2x and is already back below its entry is not a
+    // single-wallet spike, and the persistence window is pure downside: an observed run
+    // gave up 1.99x -> 0.32x while waiting out six seconds it had nothing left to learn
+    // from. Trail at a 2x peak is 26%, so a 52% drop clears the 1.5x bypass.
+    const decision = evaluateTrailingStop(cfg, position({ peakMultiple: 2 }), 0.9);
+    expect(decision).toMatchObject({ reason: 'trailing-stop', requiresPersistence: false });
+  });
+
+  it('still waits on a drop that only just clears the trail', () => {
+    // 2x peak, 26% trail: a drop to 1.45x is a 27.5% pullback, barely past the trigger
+    // and exactly the shape that persistence exists to filter.
+    const decision = evaluateTrailingStop(cfg, position({ peakMultiple: 2 }), 1.45);
+    expect(decision).toMatchObject({ reason: 'trailing-stop', requiresPersistence: true });
+  });
+
   it('lets a big run pull back further than a small one before stopping out', () => {
     // 20x peak with a 55% trail survives a drop to 9x; a 2x peak with a 26% trail does
     // not survive the equivalent proportional move.
@@ -212,6 +228,24 @@ describe('depth-aware stop', () => {
     // it is a bound on loss, not a read on liquidity.
     const decision = evaluateDepthAwareStop(cfg, position(), 0.6, 0, 100_000);
     expect(decision).toMatchObject({ reason: 'hard-stop', fraction: 1 });
+  });
+
+  it('sells a collapse immediately instead of waiting out the persistence window', () => {
+    // Down 70% against a 35% hard stop. Waiting cannot reclassify this, and on a curve
+    // draining this fast the wait is measured in further losses.
+    const decision = evaluateDepthAwareStop(cfg, position(), 0.3, 0, 0);
+    expect(decision).toMatchObject({ reason: 'hard-stop', requiresPersistence: false });
+  });
+
+  it('still waits at the hard stop itself, where the move could still be one wallet', () => {
+    const decision = evaluateDepthAwareStop(cfg, position(), 0.64, 0, 0);
+    expect(decision).toMatchObject({ reason: 'hard-stop', requiresPersistence: true });
+  });
+
+  it('sells through a depth stop breached far beyond its own floor', () => {
+    // 30% down against an 18% floor clears the 1.5x bypass exactly.
+    const decision = evaluateDepthAwareStop(cfg, position(), 0.7, 0, 0);
+    expect(decision).toMatchObject({ reason: 'curve-depth-stop', requiresPersistence: false });
   });
 
   it('tolerates a deeper drawdown on a thin curve than on a deep one', () => {

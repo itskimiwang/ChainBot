@@ -84,6 +84,7 @@
     "hardStopPct": 35,
     "stopPersistenceSeconds": 6,
     "stopPersistenceBlocks": 40,
+    "persistenceBypassMultiplier": 1.5,
     "depthAwareStopSizeFraction": 1,
     "depthStopReferenceTradeUsd": 250,
     "depthStopImpactMultiplier": 1.5,

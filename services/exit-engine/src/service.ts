@@ -14,6 +14,9 @@ import {
 
 const log = createLogger('exit');
 
+/** Shortest gap between two sell-driven re-marks of the same position. */
+const REACTION_COALESCE_MS = 400;
+
 interface PendingStop {
   reason: string;
   since: number;
@@ -42,13 +45,18 @@ export interface ExitDeps {
  * later, and a stop that reacts to the first tick below its level will be shaken out of
  * positions that were never actually in trouble. Take-profits, by contrast, fire
  * immediately — waiting to confirm a favourable move only gives it time to retrace.
+ *
+ * Persistence is skipped once a breach is far past its own threshold. The wait buys
+ * information about whether a move is one wallet or many, and past a certain depth that
+ * is no longer in question — at which point holding on only sells lower.
  */
 export class ExitEngineService {
   private readonly serialize = mutex();
   private readonly pendingStops = new Map<string, PendingStop>();
+  private readonly lastReaction = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
 
-  readonly stats = { ticks: 0, exitsFired: 0, stopsArmed: 0, stopsDisarmed: 0, stranded: 0 };
+  readonly stats = { ticks: 0, exitsFired: 0, stopsArmed: 0, stopsDisarmed: 0, stranded: 0, sellReactions: 0 };
 
   constructor(private readonly deps: ExitDeps) {}
 
@@ -57,10 +65,47 @@ export class ExitEngineService {
       () => void this.serialize(() => this.tick()),
       this.deps.config.bot.exit.markRefreshMs,
     );
+
+    // The refresh loop alone samples a position every few seconds, and a thin curve can
+    // give up most of its reserve inside one interval — which is how a stop that should
+    // have filled near its trigger fills far below it. The scanner sees curve logs much
+    // more often than that, so a sell on something we hold re-marks it straight away
+    // instead of waiting for the next tick.
+    this.deps.bus.subscribe('launch.trade', (trade) => {
+      if (trade.side !== 'sell') return;
+      const position = this.deps.ledger.positionForToken(trade.tokenAddress);
+      if (!position || position.status !== 'open') return;
+      void this.reactToSell(position);
+    });
+
     log.info('exit engine started', {
       ladder: this.deps.config.bot.exit.takeProfitLadder,
       markRefreshMs: this.deps.config.bot.exit.markRefreshMs,
       stopPersistenceSeconds: this.deps.config.bot.exit.stopPersistenceSeconds,
+    });
+  }
+
+  /**
+   * Re-mark a held position because someone sold it.
+   *
+   * Coalesced per position: a single scan page routinely carries a burst of sells on the
+   * same curve, and each re-mark is an RPC round trip against an endpoint that is already
+   * rate-limited. One read per burst carries the same information as ten.
+   */
+  private async reactToSell(position: Position): Promise<void> {
+    const last = this.lastReaction.get(position.positionId) ?? 0;
+    if (Date.now() - last < REACTION_COALESCE_MS) return;
+    this.lastReaction.set(position.positionId, Date.now());
+
+    this.stats.sellReactions += 1;
+    await this.serialize(async () => {
+      const current = this.deps.ledger.getPosition(position.positionId);
+      if (!current || current.status !== 'open') return;
+      try {
+        await this.evaluatePosition(current);
+      } catch (err) {
+        log.error('failed to evaluate position on sell', { positionId: current.positionId, err });
+      }
     });
   }
 
